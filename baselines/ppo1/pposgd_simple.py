@@ -6,7 +6,7 @@ import time
 from baselines.common.mpi_adam import MpiAdam
 from baselines.common.mpi_moments import mpi_moments
 from mpi4py import MPI
-from collections import deque
+from collections import deque 
 
 def traj_segment_generator(pi, env, horizon, stochastic):
     t = 0
@@ -85,7 +85,8 @@ def learn(env, policy_fn, *,
         max_timesteps=0, max_episodes=0, max_iters=0, max_seconds=0,  # time constraint
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
-        schedule='constant' # annealing for stepsize parameters (epsilon and adam)
+        schedule='constant', # annealing for stepsize parameters (epsilon and adam)
+        get_info=False # return information during of training
         ):
     # Setup losses and stuff
     # ----------------------------------------
@@ -135,6 +136,8 @@ def learn(env, policy_fn, *,
     episodes_so_far = 0
     timesteps_so_far = 0
     iters_so_far = 0
+    mean_rews = []
+    all_rews = []
     tstart = time.time()
     lenbuffer = deque(maxlen=100) # rolling buffer for episode lengths
     rewbuffer = deque(maxlen=100) # rolling buffer for episode rewards
@@ -198,8 +201,10 @@ def learn(env, policy_fn, *,
         lrlocal = (seg["ep_lens"], seg["ep_rets"]) # local values
         listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal) # list of tuples
         lens, rews = map(flatten_lists, zip(*listoflrpairs))
+        all_rews.append(rews)
         lenbuffer.extend(lens)
         rewbuffer.extend(rews)
+        mean_rews.append(np.mean(rewbuffer))
         logger.record_tabular("EpLenMean", np.mean(lenbuffer))
         logger.record_tabular("EpRewMean", np.mean(rewbuffer))
         logger.record_tabular("EpThisIter", len(lens))
@@ -211,8 +216,14 @@ def learn(env, policy_fn, *,
         logger.record_tabular("TimeElapsed", time.time() - tstart)
         if MPI.COMM_WORLD.Get_rank()==0:
             logger.dump_tabular()
-
-    return pi
+    info_dict = {
+        'mean_rews' : mean_rews,
+        'all_rews' : all_rews,
+    }
+    if get_info == True:    
+        return pi, info_dict
+    else:
+        return pi
 
 def flatten_lists(listoflists):
     return [el for list_ in listoflists for el in list_]
