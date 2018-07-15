@@ -86,7 +86,9 @@ def learn(env, policy_fn, *,
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
         schedule='constant', # annealing for stepsize parameters (epsilon and adam)
-        get_info=False # return information during of training
+        get_info=False, # return information during of training
+        test_env=None,
+        n_tests=5
         ):
     # Setup losses and stuff
     # ----------------------------------------
@@ -138,6 +140,7 @@ def learn(env, policy_fn, *,
     iters_so_far = 0
     mean_rews = []
     all_rews = []
+    test_rews = []
     tstart = time.time()
     lenbuffer = deque(maxlen=100) # rolling buffer for episode lengths
     rewbuffer = deque(maxlen=100) # rolling buffer for episode rewards
@@ -188,6 +191,24 @@ def learn(env, policy_fn, *,
                 losses.append(newlosses)
             logger.log(fmt_row(13, np.mean(losses, axis=0)))
 
+
+        logger.log("Testing test environment...")
+        if test_env is None:
+            test_env = env
+
+        cum_rews = []
+        for _ in range(n_tests):
+            rew_test = []
+            ob = test_env.reset()
+            while True:
+                action = pi.act(stochastic=False, ob=ob)[0]
+                ob, reward, done, _ =  test_env.step(action)
+                rew_test.append(reward)
+                if done==True:
+                    break
+            cum_rews.append(np.array(rew_test).sum())
+        test_rews.append(np.array(cum_rews).mean())
+
         logger.log("Evaluating losses...")
         losses = []
         for batch in d.iterate_once(optim_batchsize):
@@ -207,6 +228,7 @@ def learn(env, policy_fn, *,
         mean_rews.append(np.mean(rewbuffer))
         logger.record_tabular("EpLenMean", np.mean(lenbuffer))
         logger.record_tabular("EpRewMean", np.mean(rewbuffer))
+        logger.record_tabular("EpTestRewMean", np.array(cum_rews).mean())
         logger.record_tabular("EpThisIter", len(lens))
         episodes_so_far += len(lens)
         timesteps_so_far += sum(lens)
@@ -218,7 +240,8 @@ def learn(env, policy_fn, *,
             logger.dump_tabular()
     info_dict = {
         'mean_rews' : mean_rews,
-        'all_rews' : all_rews,
+        'all_rews'  : all_rews,
+        'test_rews' : test_rews,
     }
     if get_info == True:    
         return pi, info_dict
