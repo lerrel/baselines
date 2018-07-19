@@ -6,7 +6,8 @@ import time
 from baselines.common.mpi_adam import MpiAdam
 from baselines.common.mpi_moments import mpi_moments
 from mpi4py import MPI
-from collections import deque 
+from collections import deque
+from IPython import embed
 
 def traj_segment_generator(pi, env, horizon, stochastic):
     t = 0
@@ -88,7 +89,7 @@ def learn(env, policy_fn, *,
         schedule='constant', # annealing for stepsize parameters (epsilon and adam)
         get_info=False, # return information during of training
         test_env=None,
-        n_tests=5
+        n_tests=1
         ):
     # Setup losses and stuff
     # ----------------------------------------
@@ -243,7 +244,7 @@ def learn(env, policy_fn, *,
         'all_rews'  : all_rews,
         'test_rews' : test_rews,
     }
-    if get_info == True:    
+    if get_info == True:
         return pi, info_dict
     else:
         return pi

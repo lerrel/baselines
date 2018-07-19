@@ -12,7 +12,7 @@ class RolloutWorker:
     @store_args
     def __init__(self, make_env, policy, dims, logger, T, rollout_batch_size=1,
                  exploit=False, use_target_net=False, compute_Q=False, noise_eps=0,
-                 random_eps=0, history_len=100, render=False, **kwargs):
+                 random_eps=0, history_len=100, render=False, viz=False,**kwargs):
         """Rollout worker generates experience by interacting with one or many environments.
 
         Args:
@@ -33,12 +33,14 @@ class RolloutWorker:
         """
         self.envs = [make_env() for _ in range(rollout_batch_size)]
         assert self.T > 0
+        self.viz = viz
 
         self.info_keys = [key.replace('info_', '') for key in dims.keys() if key.startswith('info_')]
 
         self.success_history = deque(maxlen=history_len)
         self.Q_history = deque(maxlen=history_len)
 
+        self.mean_success = 0.0
         self.n_episodes = 0
         self.g = np.empty((self.rollout_batch_size, self.dims['g']), np.float32)  # goals
         self.initial_o = np.empty((self.rollout_batch_size, self.dims['o']), np.float32)  # observations
@@ -51,6 +53,8 @@ class RolloutWorker:
         and `g` arrays accordingly.
         """
         obs = self.envs[i].reset()
+        if self.viz==True:
+            self.envs[i].viz(True)
         self.initial_o[i] = obs['observation']
         self.initial_ag[i] = obs['achieved_goal']
         self.g[i] = obs['desired_goal']
@@ -74,7 +78,7 @@ class RolloutWorker:
         ag[:] = self.initial_ag
 
         # generate episodes
-        obs, achieved_goals, acts, goals, successes = [], [], [], [], []
+        obs, achieved_goals, acts, goals, successes, all_success = [], [], [], [], [], []
         info_values = [np.empty((self.T, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
         Qs = []
         for t in range(self.T):
@@ -106,12 +110,15 @@ class RolloutWorker:
                     curr_o_new, _, _, info = self.envs[i].step(u[i])
                     if 'is_success' in info:
                         success[i] = info['is_success']
+                        all_success.append(info['is_success'])
                     o_new[i] = curr_o_new['observation']
                     ag_new[i] = curr_o_new['achieved_goal']
                     for idx, key in enumerate(self.info_keys):
                         info_values[idx][t, i] = info[key]
                     if self.render:
                         self.envs[i].render()
+                    if self.viz==True:
+                        self.envs[i].viz(True)
                 except MujocoException as e:
                     return self.generate_rollouts()
 
@@ -143,6 +150,7 @@ class RolloutWorker:
         assert successful.shape == (self.rollout_batch_size,)
         success_rate = np.mean(successful)
         self.success_history.append(success_rate)
+        self.mean_success = np.mean(all_success)
         if self.compute_Q:
             self.Q_history.append(np.mean(Qs))
         self.n_episodes += self.rollout_batch_size
@@ -172,6 +180,7 @@ class RolloutWorker:
         """
         logs = []
         logs += [('success_rate', np.mean(self.success_history))]
+        logs += [('episodic_success', self.mean_success)]
         if self.compute_Q:
             logs += [('mean_Q', np.mean(self.Q_history))]
         logs += [('episode', self.n_episodes)]
@@ -186,3 +195,7 @@ class RolloutWorker:
         """
         for idx, env in enumerate(self.envs):
             env.seed(seed + 1000 * idx)
+
+    def close(self):
+        for env in self.envs:
+            env.close()
