@@ -12,7 +12,7 @@ class RolloutWorker:
     @store_args
     def __init__(self, make_env, policy, dims, logger, T, rollout_batch_size=1,
                  exploit=False, use_target_net=False, compute_Q=False, noise_eps=0,
-                 random_eps=0, history_len=100, render=False, viz=False,**kwargs):
+                 random_eps=0, history_len=100, render=False, viz=False, forced_action=None, **kwargs):
         """Rollout worker generates experience by interacting with one or many environments.
 
         Args:
@@ -32,6 +32,7 @@ class RolloutWorker:
             render (boolean): whether or not to render the rollouts
         """
         self.envs = [make_env() for _ in range(rollout_batch_size)]
+        self.forced_action = forced_action
         assert self.T > 0
         self.viz = viz
 
@@ -82,12 +83,19 @@ class RolloutWorker:
         info_values = [np.empty((self.T, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
         Qs = []
         for t in range(self.T):
-            policy_output = self.policy.get_actions(
-                o, ag, self.g,
-                compute_Q=self.compute_Q,
-                noise_eps=self.noise_eps if not self.exploit else 0.,
-                random_eps=self.random_eps if not self.exploit else 0.,
-                use_target_net=self.use_target_net)
+            if self.forced_action is not None:
+                u = self.forced_action[t]
+                if self.compute_Q:
+                    policy_output = (u, 0.0)
+                else:
+                    policy_output = u
+            else:
+                policy_output = self.policy.get_actions(
+                    o, ag, self.g,
+                    compute_Q=self.compute_Q,
+                    noise_eps=self.noise_eps if not self.exploit else 0.,
+                    random_eps=self.random_eps if not self.exploit else 0.,
+                    use_target_net=self.use_target_net)
 
             if self.compute_Q:
                 u, Q = policy_output
